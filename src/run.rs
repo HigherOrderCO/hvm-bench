@@ -57,7 +57,7 @@ pub fn interpreted_c<P: AsRef<Path>, Q: AsRef<Path>>(hvm_bin: P, program: Q) -> 
 }
 
 pub fn interpreted_cuda<P: AsRef<Path>, Q: AsRef<Path>>(hvm_bin: P, program: Q) -> Result<Timing> {
-  interpreted(hvm_bin, "run-cuda", program)
+  interpreted(hvm_bin, "run-cu", program)
 }
 
 pub fn interpreted_rust<P: AsRef<Path>, Q: AsRef<Path>>(hvm_bin: P, program: Q) -> Result<Timing> {
