@@ -96,20 +96,14 @@ impl Bench {
 
       let program_name = program.file_stem().context("file stem")?.to_string_lossy().into_owned();
 
-      let interpreted_c = run::interpreted_c(&bin, &program);
-      let interpreted_cuda = run::interpreted_cuda(&bin, &program);
-      let interpreted_rust = run::interpreted_rust(&bin, &program);
-      let compiled_c = Ok("unsupported".to_string());
-      let compiled_cuda = Ok("unsupported".to_string());
-
       self.stats.entry(rev.to_string()).or_default().programs.insert(
         program_name,
         Program {
-          interpreted_c,
-          interpreted_cuda,
-          interpreted_rust,
-          compiled_c,
-          compiled_cuda,
+          interpreted_c: run::interpreted_c(&bin, &program),
+          interpreted_cuda: run::interpreted_cuda(&bin, &program),
+          interpreted_rust: run::interpreted_rust(&bin, &program),
+          compiled_c: run::compiled_c(&bin, &program),
+          compiled_cuda: run::compiled_cuda(&bin, &program),
         },
       );
     }

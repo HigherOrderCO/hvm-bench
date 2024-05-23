@@ -15,14 +15,23 @@ pub struct Stats {
 /// Runtime statistics for a single hvm program, across all interpreted and
 /// compiled runtimes.
 pub struct Program {
+  pub compiled_c: Result<Timing>,
+  pub compiled_cuda: Result<Timing>,
   pub interpreted_c: Result<Timing>,
   pub interpreted_cuda: Result<Timing>,
   pub interpreted_rust: Result<Timing>,
-  pub compiled_c: Result<Timing>,
-  pub compiled_cuda: Result<Timing>,
 }
 
 impl Program {
+  pub fn compiled(&self, runtime: &str) -> &Result<Timing> {
+    match runtime {
+      "c" => &self.compiled_c,
+      "cuda" => &self.compiled_cuda,
+
+      _ => panic!("unexpected runtime: {runtime}"),
+    }
+  }
+
   pub fn interpreted(&self, runtime: &str) -> &Result<Timing> {
     match runtime {
       "c" => &self.interpreted_c,

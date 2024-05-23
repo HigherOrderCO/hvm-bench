@@ -1,6 +1,7 @@
-use std::{path::Path, process::Command};
+use std::{io::Write, path::Path, process::Command};
 
 use anyhow::{Context, Result};
+use tempfile::{Builder, TempDir};
 
 use crate::stats::Timing;
 
@@ -47,7 +48,7 @@ fn interpreted<P: AsRef<Path>, Q: AsRef<Path>>(hvm_bin: P, mode: &str, program: 
   let hvm_bin = hvm_bin.as_ref();
   let program = program.as_ref();
 
-  let stdout = run_program(hvm_bin, mode, program).with_context(|| format!("{hvm_bin:?} {mode} {program:?}"))?;
+  let stdout = run_program(hvm_bin, mode, program).context("run")?;
 
   parse_stdout(&stdout).context("parse")
 }
@@ -62,4 +63,51 @@ pub fn interpreted_cuda<P: AsRef<Path>, Q: AsRef<Path>>(hvm_bin: P, program: Q) 
 
 pub fn interpreted_rust<P: AsRef<Path>, Q: AsRef<Path>>(hvm_bin: P, program: Q) -> Result<Timing> {
   interpreted(hvm_bin, "run", program)
+}
+
+/// Generates a file to be compiled.
+fn generate_program<P: AsRef<Path>, Q: AsRef<Path>>(hvm_bin: P, mode: &str, program: Q) -> Result<String> {
+  let hvm_bin = hvm_bin.as_ref();
+  let program = program.as_ref();
+
+  run_program(hvm_bin, mode, program).with_context(|| format!("{hvm_bin:?} {mode} {program:?}"))
+}
+
+fn compile_and_run(compiler: &str, file: &Path, args: &[&str]) -> Result<Timing> {
+  let bin_dir = TempDir::with_prefix("hvm-bench-compile-").context("tempdir")?;
+  let binary = bin_dir.path().join("bin");
+
+  let status = Command::new(compiler)
+    .arg(file)
+    .args(args)
+    .arg("-o")
+    .arg(&binary)
+    .status()
+    .context("compile")?;
+  if !status.success() {
+    anyhow::bail!("compiler exited with non-zero status {}", status);
+  }
+
+  let output = Command::new(&binary).output().context("run")?;
+  if !output.status.success() {
+    anyhow::bail!("runner exited with non-zero status {}", output.status);
+  }
+
+  parse_stdout(&String::from_utf8_lossy(&output.stdout).into_owned()).context("parse")
+}
+
+pub fn compiled_c<P: AsRef<Path>, Q: AsRef<Path>>(hvm_bin: P, program: Q) -> Result<Timing> {
+  let mut c_file = Builder::new().suffix(".c").tempfile().context("tempfile")?;
+  let c_code = generate_program(hvm_bin, "gen-c", program).context("generate program")?;
+  c_file.write_all(c_code.as_bytes()).context("write")?;
+
+  compile_and_run("gcc", &c_file.path(), &["-lm"]).context("compile and run")
+}
+
+pub fn compiled_cuda<P: AsRef<Path>, Q: AsRef<Path>>(hvm_bin: P, program: Q) -> Result<Timing> {
+  let mut cu_file = Builder::new().suffix(".cu").tempfile().context("tempfile")?;
+  let cu_code = generate_program(hvm_bin, "gen-cu", program).context("generate program")?;
+  cu_file.write_all(cu_code.as_bytes()).context("write")?;
+
+  compile_and_run("nvcc", &cu_file.path(), &[]).context("compile and run")
 }
