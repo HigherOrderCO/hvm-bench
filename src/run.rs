@@ -93,7 +93,7 @@ fn compile_and_run(compiler: &str, file: &Path, args: &[&str]) -> Result<Timing>
     anyhow::bail!("runner exited with non-zero status {}", output.status);
   }
 
-  parse_stdout(&String::from_utf8_lossy(&output.stdout).into_owned()).context("parse")
+  parse_stdout(&String::from_utf8_lossy(&output.stdout)).context("parse")
 }
 
 pub fn compiled_c<P: AsRef<Path>, Q: AsRef<Path>>(hvm_bin: P, program: Q) -> Result<Timing> {
@@ -101,7 +101,7 @@ pub fn compiled_c<P: AsRef<Path>, Q: AsRef<Path>>(hvm_bin: P, program: Q) -> Res
   let c_code = generate_program(hvm_bin, "gen-c", program).context("generate program")?;
   c_file.write_all(c_code.as_bytes()).context("write")?;
 
-  compile_and_run("gcc", &c_file.path(), &["-lm"]).context("compile and run")
+  compile_and_run("gcc", c_file.path(), &["-lm", "-O2"]).context("compile and run")
 }
 
 pub fn compiled_cuda<P: AsRef<Path>, Q: AsRef<Path>>(hvm_bin: P, program: Q) -> Result<Timing> {
@@ -109,5 +109,5 @@ pub fn compiled_cuda<P: AsRef<Path>, Q: AsRef<Path>>(hvm_bin: P, program: Q) -> 
   let cu_code = generate_program(hvm_bin, "gen-cu", program).context("generate program")?;
   cu_file.write_all(cu_code.as_bytes()).context("write")?;
 
-  compile_and_run("nvcc", &cu_file.path(), &[]).context("compile and run")
+  compile_and_run("nvcc", cu_file.path(), &["-O3"]).context("compile and run")
 }
