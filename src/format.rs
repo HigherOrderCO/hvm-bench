@@ -19,6 +19,32 @@ fn format_header<'a, I: IntoIterator<Item = &'a str>>(revisions: I) -> String {
 }
 
 fn format_rows(stats: &BTreeMap<String, Stats>) -> Result<String> {
+  macro_rules! writeln_runtime {
+    ($rows:ident, $revisions:ident, $($col:expr),*) => {{
+      let row = vec![$($col,)*]
+        .into_iter()
+        .chain(
+          $revisions
+            .values()
+            .map(|r| r.interpreted_c.as_deref().unwrap_or("error")),
+        )
+        .enumerate()
+        .map(|(i, col)| {
+          if i < 2 {
+            format!("{col:<COLUMN_WIDTH$}")
+          } else {
+            format!("{col:>COLUMN_WIDTH$}")
+          }
+        })
+        .collect::<Vec<_>>()
+        .join(COLUMN_PADDING);
+
+      writeln!($rows, "{row}")?;
+
+      row
+    }};
+  }
+
   let mut by_program_revision: BTreeMap<String, BTreeMap<String, &Program>> = BTreeMap::new();
   for (revision, programs) in stats {
     for (program, stats) in &programs.programs {
@@ -32,43 +58,11 @@ fn format_rows(stats: &BTreeMap<String, Stats>) -> Result<String> {
   let mut rows = String::new();
 
   for (program, revisions) in &by_program_revision {
-    let interpreted_c = vec![program, "c"]
-      .into_iter()
-      .chain(
-        revisions
-          .values()
-          .map(|r| r.interpreted_c.as_deref().unwrap_or("error")),
-      )
-      .map(|col| format!("{col:<COLUMN_WIDTH$}"))
-      .collect::<Vec<_>>()
-      .join(COLUMN_PADDING);
+    writeln_runtime!(rows, revisions, program, "c");
+    writeln_runtime!(rows, revisions, "", "cuda");
+    let row = writeln_runtime!(rows, revisions, "", "rust");
 
-    let interpreted_cuda = vec!["", "cuda"]
-      .into_iter()
-      .chain(
-        revisions
-          .values()
-          .map(|r| r.interpreted_cuda.as_deref().unwrap_or("error")),
-      )
-      .map(|col| format!("{col:<COLUMN_WIDTH$}"))
-      .collect::<Vec<_>>()
-      .join(COLUMN_PADDING);
-
-    let interpreted_rust = vec!["", "rust"]
-      .into_iter()
-      .chain(
-        revisions
-          .values()
-          .map(|r| r.interpreted_rust.as_deref().unwrap_or("error")),
-      )
-      .map(|col| format!("{col:<COLUMN_WIDTH$}"))
-      .collect::<Vec<_>>()
-      .join(COLUMN_PADDING);
-
-    writeln!(rows, "{interpreted_c}")?;
-    writeln!(rows, "{interpreted_cuda}")?;
-    writeln!(rows, "{interpreted_rust}")?;
-    writeln!(rows, "{}", "-".repeat(interpreted_c.len()))?;
+    writeln!(rows, "{}", "-".repeat(row.len()))?;
   }
 
   Ok(rows)
