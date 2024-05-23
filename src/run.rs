@@ -21,7 +21,7 @@ const TIME_PREFIX: &str = "- TIME: ";
 ///
 /// This will return an error if:
 /// - the exit status is non-zero.
-fn run_program(hvm_bin: &Path, mode: &str, program: &Path, timeout: Duration) -> Result<String> {
+fn run_program(hvm_bin: &Path, mode: &str, program: &Path, timeout: Duration) -> Result<Option<String>> {
   let mut child = Command::new(hvm_bin)
     .arg(mode)
     .arg(program)
@@ -34,9 +34,8 @@ fn run_program(hvm_bin: &Path, mode: &str, program: &Path, timeout: Duration) ->
 
   let status = child.wait_timeout(timeout).context("wait")?;
   let Some(status) = status else {
-    return Ok("timeout".to_string());
+    return Ok(None);
   };
-
   if !status.success() {
     anyhow::bail!("non-zero exit status {}", status);
   }
@@ -44,7 +43,7 @@ fn run_program(hvm_bin: &Path, mode: &str, program: &Path, timeout: Duration) ->
   let mut output = String::new();
   stdout.read_to_string(&mut output).context("read")?;
 
-  Ok(output)
+  Ok(Some(output))
 }
 
 /// Returns the timing line of an `hvm` run.
@@ -68,7 +67,9 @@ where
   let hvm_bin = hvm_bin.as_ref();
   let program = program.as_ref();
 
-  let stdout = run_program(hvm_bin, mode, program, timeout).context("run")?;
+  let Some(stdout) = run_program(hvm_bin, mode, program, timeout).context("run")? else {
+    return Ok("timeout".to_string());
+  };
 
   parse_stdout(&stdout).context("parse")
 }
@@ -106,10 +107,12 @@ where
   let hvm_bin = hvm_bin.as_ref();
   let program = program.as_ref();
 
-  run_program(hvm_bin, mode, program, timeout).with_context(|| format!("{hvm_bin:?} {mode} {program:?}"))
+  run_program(hvm_bin, mode, program, timeout)
+    .with_context(|| format!("{hvm_bin:?} {mode} {program:?}"))?
+    .context("timeout")
 }
 
-fn compile_and_run(compiler: &str, file: &Path, args: &[&str]) -> Result<Timing> {
+fn compile_and_run(compiler: &str, file: &Path, args: &[&str], timeout: Duration) -> Result<Timing> {
   let bin_dir = TempDir::with_prefix("hvm-bench-compile-").context("tempdir")?;
   let binary = bin_dir.path().join("bin");
 
@@ -124,12 +127,26 @@ fn compile_and_run(compiler: &str, file: &Path, args: &[&str]) -> Result<Timing>
     anyhow::bail!("compiler exited with non-zero status {}", status);
   }
 
-  let output = Command::new(&binary).output().context("run")?;
-  if !output.status.success() {
-    anyhow::bail!("runner exited with non-zero status {}", output.status);
+  let mut child = Command::new(binary)
+    .stderr(Stdio::piped())
+    .stdout(Stdio::piped())
+    .spawn()
+    .context("spawn")?;
+
+  let mut stdout = child.stdout.take().context("stdout")?;
+
+  let status = child.wait_timeout(timeout).context("wait")?;
+  let Some(status) = status else {
+    return Ok("timeout".to_string());
+  };
+  if !status.success() {
+    anyhow::bail!("non-zero exit status {}", status);
   }
 
-  parse_stdout(&String::from_utf8_lossy(&output.stdout)).context("parse")
+  let mut output = String::new();
+  stdout.read_to_string(&mut output).context("read")?;
+
+  parse_stdout(&output).context("parse")
 }
 
 pub fn compiled_c<P, Q>(hvm_bin: P, program: Q, timeout: Duration) -> Result<Timing>
@@ -141,7 +158,7 @@ where
   let c_code = generate_program(hvm_bin, "gen-c", program, timeout).context("generate program")?;
   c_file.write_all(c_code.as_bytes()).context("write")?;
 
-  compile_and_run("gcc", c_file.path(), &["-lm", "-O2"]).context("compile and run")
+  compile_and_run("gcc", c_file.path(), &["-lm", "-O2"], timeout).context("compile and run")
 }
 
 pub fn compiled_cuda<P, Q>(hvm_bin: P, program: Q, timeout: Duration) -> Result<Timing>
@@ -153,5 +170,5 @@ where
   let cu_code = generate_program(hvm_bin, "gen-cu", program, timeout).context("generate program")?;
   cu_file.write_all(cu_code.as_bytes()).context("write")?;
 
-  compile_and_run("nvcc", cu_file.path(), &["-w", "-O3"]).context("compile and run")
+  compile_and_run("nvcc", cu_file.path(), &["-w", "-O3"], timeout).context("compile and run")
 }
