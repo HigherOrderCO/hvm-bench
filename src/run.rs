@@ -109,5 +109,5 @@ pub fn compiled_cuda<P: AsRef<Path>, Q: AsRef<Path>>(hvm_bin: P, program: Q) -> 
   let cu_code = generate_program(hvm_bin, "gen-cu", program).context("generate program")?;
   cu_file.write_all(cu_code.as_bytes()).context("write")?;
 
-  compile_and_run("nvcc", cu_file.path(), &["-O3"]).context("compile and run")
+  compile_and_run("nvcc", cu_file.path(), &["-w", "-O3"]).context("compile and run")
 }
