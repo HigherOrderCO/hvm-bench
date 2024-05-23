@@ -117,7 +117,7 @@ fn format_interpreted_rows(stats: &BTreeMap<String, Stats>) -> Result<String> {
   Ok(rows)
 }
 
-pub fn format(stats: &BTreeMap<String, Stats>) -> Result<(String, String)> {
+pub fn format(stats: &BTreeMap<String, Stats>) -> Result<String> {
   let mut table = String::new();
 
   writeln!(table, "compiled")?;
@@ -134,5 +134,5 @@ pub fn format(stats: &BTreeMap<String, Stats>) -> Result<(String, String)> {
   writeln!(table, "{}", format_header(stats.keys().map(String::as_str)))?;
   writeln!(table, "{}", format_interpreted_rows(stats)?)?;
 
-  Ok((table, "unimplemented".to_string()))
+  Ok(table)
 }

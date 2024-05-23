@@ -38,9 +38,7 @@ fn main() -> Result<()> {
       let mut bench = Bench::new(repo_dir, revs).context("Bench::new")?;
       bench.bench().context("bench")?;
 
-      let (interpreted, compiled) = format::format(&bench.stats).context("format")?;
-
-      println!("{interpreted}");
+      println!("{}", format::format(&bench.stats).context("format")?);
     }
   }
 
