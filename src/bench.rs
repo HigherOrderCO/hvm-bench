@@ -3,6 +3,7 @@ use std::{
   fs,
   path::{Path, PathBuf},
   process::Command,
+  time::Duration,
 };
 
 use anyhow::{Context, Result};
@@ -21,6 +22,8 @@ pub struct Bench {
   local_dir: PathBuf,
   /// Remote revisions.
   remote_revs: Vec<String>,
+  /// Timeout for runs.
+  timeout: Duration,
   /// Statistics collected for each revision.
   pub stats: BTreeMap<String, Stats>,
   /// Temporary directory for binaries and remote repo.
@@ -28,7 +31,7 @@ pub struct Bench {
 }
 
 impl Bench {
-  pub fn new(local_dir: PathBuf, remote_revs: Vec<String>) -> Result<Self> {
+  pub fn new(local_dir: PathBuf, remote_revs: Vec<String>, timeout: Duration) -> Result<Self> {
     let tempdir = TempDir::with_prefix("hvm-bench-").context("tempdir")?;
 
     fs::create_dir(tempdir.path().join("repo")).context("create_dir repo")?;
@@ -37,6 +40,7 @@ impl Bench {
     Ok(Self {
       local_dir,
       remote_revs,
+      timeout,
       stats: BTreeMap::new(),
       tempdir,
     })
@@ -99,11 +103,11 @@ impl Bench {
       self.stats.entry(rev.to_string()).or_default().programs.insert(
         program_name,
         Program {
-          interpreted_c: run::interpreted_c(&bin, &program),
-          interpreted_cuda: run::interpreted_cuda(&bin, &program),
-          interpreted_rust: run::interpreted_rust(&bin, &program),
-          compiled_c: run::compiled_c(&bin, &program),
-          compiled_cuda: run::compiled_cuda(&bin, &program),
+          interpreted_c: run::interpreted_c(&bin, &program, self.timeout),
+          interpreted_cuda: run::interpreted_cuda(&bin, &program, self.timeout),
+          interpreted_rust: run::interpreted_rust(&bin, &program, self.timeout),
+          compiled_c: run::compiled_c(&bin, &program, self.timeout),
+          compiled_cuda: run::compiled_cuda(&bin, &program, self.timeout),
         },
       );
     }

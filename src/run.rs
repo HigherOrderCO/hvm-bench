@@ -1,7 +1,13 @@
-use std::{io::Write, path::Path, process::Command};
+use std::{
+  io::{Read, Write},
+  path::Path,
+  process::{Command, Stdio},
+  time::Duration,
+};
 
 use anyhow::{Context, Result};
 use tempfile::{Builder, TempDir};
+use wait_timeout::ChildExt;
 
 use crate::stats::Timing;
 
@@ -11,24 +17,34 @@ const TIME_PREFIX: &str = "- TIME: ";
 /// `mode` is provided as a positional argument to `hvm_bin`, so it is expected
 /// to be one of the `hvm` commands (`run`, `run-c`, `run-cu`, etc).
 ///
-/// TODO: this function should be blocking, but should timeout after N seconds.
-///
 /// # Errors
 ///
 /// This will return an error if:
 /// - the exit status is non-zero.
-fn run_program(hvm_bin: &Path, mode: &str, program: &Path) -> Result<String> {
-  let output = Command::new(hvm_bin)
+fn run_program(hvm_bin: &Path, mode: &str, program: &Path, timeout: Duration) -> Result<String> {
+  let mut child = Command::new(hvm_bin)
     .arg(mode)
     .arg(program)
-    .output()
-    .context("output")?;
+    .stderr(Stdio::piped())
+    .stdout(Stdio::piped())
+    .spawn()
+    .context("spawn")?;
 
-  if !output.status.success() {
-    anyhow::bail!("non-zero exit status {}", output.status);
+  let mut stdout = child.stdout.take().context("stdout")?;
+
+  let status = child.wait_timeout(timeout).context("wait")?;
+  let Some(status) = status else {
+    return Ok("timeout".to_string());
+  };
+
+  if !status.success() {
+    anyhow::bail!("non-zero exit status {}", status);
   }
 
-  Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+  let mut output = String::new();
+  stdout.read_to_string(&mut output).context("read")?;
+
+  Ok(output)
 }
 
 /// Returns the timing line of an `hvm` run.
@@ -44,33 +60,53 @@ fn parse_stdout(stdout: &str) -> Result<Timing> {
 
 /// Executes `hvm_bin mode program`, parsing hvm's timing output. an interpreted
 /// mode, without an additional C compilation step.
-fn interpreted<P: AsRef<Path>, Q: AsRef<Path>>(hvm_bin: P, mode: &str, program: Q) -> Result<Timing> {
+fn interpreted<P, Q>(hvm_bin: P, mode: &str, program: Q, timeout: Duration) -> Result<Timing>
+where
+  P: AsRef<Path>,
+  Q: AsRef<Path>,
+{
   let hvm_bin = hvm_bin.as_ref();
   let program = program.as_ref();
 
-  let stdout = run_program(hvm_bin, mode, program).context("run")?;
+  let stdout = run_program(hvm_bin, mode, program, timeout).context("run")?;
 
   parse_stdout(&stdout).context("parse")
 }
 
-pub fn interpreted_c<P: AsRef<Path>, Q: AsRef<Path>>(hvm_bin: P, program: Q) -> Result<Timing> {
-  interpreted(hvm_bin, "run-c", program)
+pub fn interpreted_c<P, Q>(hvm_bin: P, program: Q, timeout: Duration) -> Result<Timing>
+where
+  P: AsRef<Path>,
+  Q: AsRef<Path>,
+{
+  interpreted(hvm_bin, "run-c", program, timeout)
 }
 
-pub fn interpreted_cuda<P: AsRef<Path>, Q: AsRef<Path>>(hvm_bin: P, program: Q) -> Result<Timing> {
-  interpreted(hvm_bin, "run-cu", program)
+pub fn interpreted_cuda<P, Q>(hvm_bin: P, program: Q, timeout: Duration) -> Result<Timing>
+where
+  P: AsRef<Path>,
+  Q: AsRef<Path>,
+{
+  interpreted(hvm_bin, "run-cu", program, timeout)
 }
 
-pub fn interpreted_rust<P: AsRef<Path>, Q: AsRef<Path>>(hvm_bin: P, program: Q) -> Result<Timing> {
-  interpreted(hvm_bin, "run", program)
+pub fn interpreted_rust<P, Q>(hvm_bin: P, program: Q, timeout: Duration) -> Result<Timing>
+where
+  P: AsRef<Path>,
+  Q: AsRef<Path>,
+{
+  interpreted(hvm_bin, "run", program, timeout)
 }
 
 /// Generates a file to be compiled.
-fn generate_program<P: AsRef<Path>, Q: AsRef<Path>>(hvm_bin: P, mode: &str, program: Q) -> Result<String> {
+fn generate_program<P, Q>(hvm_bin: P, mode: &str, program: Q, timeout: Duration) -> Result<String>
+where
+  P: AsRef<Path>,
+  Q: AsRef<Path>,
+{
   let hvm_bin = hvm_bin.as_ref();
   let program = program.as_ref();
 
-  run_program(hvm_bin, mode, program).with_context(|| format!("{hvm_bin:?} {mode} {program:?}"))
+  run_program(hvm_bin, mode, program, timeout).with_context(|| format!("{hvm_bin:?} {mode} {program:?}"))
 }
 
 fn compile_and_run(compiler: &str, file: &Path, args: &[&str]) -> Result<Timing> {
@@ -96,17 +132,25 @@ fn compile_and_run(compiler: &str, file: &Path, args: &[&str]) -> Result<Timing>
   parse_stdout(&String::from_utf8_lossy(&output.stdout)).context("parse")
 }
 
-pub fn compiled_c<P: AsRef<Path>, Q: AsRef<Path>>(hvm_bin: P, program: Q) -> Result<Timing> {
+pub fn compiled_c<P, Q>(hvm_bin: P, program: Q, timeout: Duration) -> Result<Timing>
+where
+  P: AsRef<Path>,
+  Q: AsRef<Path>,
+{
   let mut c_file = Builder::new().suffix(".c").tempfile().context("tempfile")?;
-  let c_code = generate_program(hvm_bin, "gen-c", program).context("generate program")?;
+  let c_code = generate_program(hvm_bin, "gen-c", program, timeout).context("generate program")?;
   c_file.write_all(c_code.as_bytes()).context("write")?;
 
   compile_and_run("gcc", c_file.path(), &["-lm", "-O2"]).context("compile and run")
 }
 
-pub fn compiled_cuda<P: AsRef<Path>, Q: AsRef<Path>>(hvm_bin: P, program: Q) -> Result<Timing> {
+pub fn compiled_cuda<P, Q>(hvm_bin: P, program: Q, timeout: Duration) -> Result<Timing>
+where
+  P: AsRef<Path>,
+  Q: AsRef<Path>,
+{
   let mut cu_file = Builder::new().suffix(".cu").tempfile().context("tempfile")?;
-  let cu_code = generate_program(hvm_bin, "gen-cu", program).context("generate program")?;
+  let cu_code = generate_program(hvm_bin, "gen-cu", program, timeout).context("generate program")?;
   cu_file.write_all(cu_code.as_bytes()).context("write")?;
 
   compile_and_run("nvcc", cu_file.path(), &["-w", "-O3"]).context("compile and run")
