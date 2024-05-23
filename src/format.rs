@@ -43,7 +43,7 @@ fn format_rows(stats: &BTreeMap<String, Stats>) -> Result<String> {
       .collect::<Vec<_>>()
       .join(COLUMN_PADDING);
 
-    let interpreted_cuda = vec![program, "cuda"]
+    let interpreted_cuda = vec!["", "cuda"]
       .into_iter()
       .chain(
         revisions
@@ -54,7 +54,7 @@ fn format_rows(stats: &BTreeMap<String, Stats>) -> Result<String> {
       .collect::<Vec<_>>()
       .join(COLUMN_PADDING);
 
-    let interpreted_rust = vec![program, "rust"]
+    let interpreted_rust = vec!["", "rust"]
       .into_iter()
       .chain(
         revisions
@@ -65,7 +65,10 @@ fn format_rows(stats: &BTreeMap<String, Stats>) -> Result<String> {
       .collect::<Vec<_>>()
       .join(COLUMN_PADDING);
 
-    rows.push_str(&format!("{interpreted_c}\n{interpreted_cuda}\n{interpreted_rust}"));
+    writeln!(rows, "{interpreted_c}")?;
+    writeln!(rows, "{interpreted_cuda}")?;
+    writeln!(rows, "{interpreted_rust}")?;
+    writeln!(rows, "{}", "-".repeat(interpreted_c.len()))?;
   }
 
   Ok(rows)
@@ -76,7 +79,7 @@ pub fn format(stats: BTreeMap<String, Stats>) -> Result<(String, String)> {
 
   writeln!(table, "interpreted")?;
   writeln!(table, "===========")?;
-  writeln!(table);
+  writeln!(table)?;
 
   writeln!(table, "{}", format_header(stats.keys().map(String::as_str)))?;
 
