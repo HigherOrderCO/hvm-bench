@@ -8,9 +8,13 @@ use std::{
 use anyhow::{Context, Result};
 use tempfile::TempDir;
 
-use crate::stats::Stats;
+use crate::{
+  run,
+  stats::{Program, Stats},
+};
 
 const GIT_URL: &str = "https://github.com/HigherOrderCO/hvm.git";
+const PROGRAMS_DIR: &str = "./programs";
 
 pub struct Bench {
   /// Local hvm directory.
@@ -18,7 +22,7 @@ pub struct Bench {
   /// Remote revisions.
   remote_revs: Vec<String>,
   /// Statistics collected for each revision.
-  stats: BTreeMap<String, Stats>,
+  pub stats: BTreeMap<String, Stats>,
   /// Temporary directory for binaries and remote repo.
   tempdir: TempDir,
 }
@@ -51,26 +55,22 @@ impl Bench {
     fs::rename(
       self.local_dir.join("target/release/hvm"),
       self.bin_dir().join("local_hvm"),
-    )?;
+    )
+    .context("rename local")?;
 
     for rev in &self.remote_revs {
-      let binary = self.bin_dir().join(&rev).join("hvm");
+      let bin_rev_dir = self.bin_dir().join(&rev);
+      fs::create_dir(&bin_rev_dir).context("create dir")?;
+
+      let binary = bin_rev_dir.join("hvm");
 
       self.checkout_remote(&rev).with_context(|| format!("checkout {rev}"))?;
       self
         .cargo_build(self.remote_repo_dir())
         .with_context(|| format!("cargo build remote {rev}"))?;
 
-      fs::rename(self.remote_repo_dir().join("target/release/hvm"), &binary)?;
+      fs::rename(self.remote_repo_dir().join("target/release/hvm"), &binary).context("rename remote")?;
     }
-
-    Ok(())
-  }
-
-  fn bench_bin<P: AsRef<Path>>(&mut self, bin: P) -> Result<()> {
-    // TODO: clone examples from repo, or use fixed examples
-    // run each program on each runtime
-    // parse stats
 
     Ok(())
   }
@@ -78,15 +78,50 @@ impl Bench {
   fn bench_all(&mut self) -> Result<()> {
     for rev in self.remote_revs.clone() {
       self
-        .bench_bin(self.bin_dir().join(&rev).join("hvm"))
+        .bench_bin(&rev, self.bin_dir().join(&rev).join("hvm"))
         .with_context(|| format!("bench {rev}"))?;
     }
 
     self
-      .bench_bin(self.bin_dir().join("local_hvm"))
+      .bench_bin("(local)", self.bin_dir().join("local_hvm"))
       .context("bench local")?;
 
     Ok(())
+  }
+
+  fn bench_bin<P: AsRef<Path>>(&mut self, rev: &str, bin: P) -> Result<()> {
+    eprintln!("benchmarking {rev:?}");
+    for program in self.programs().context("programs")? {
+      eprintln!("  running {program:?}");
+
+      let program_name = program.file_stem().context("file stem")?.to_string_lossy().into_owned();
+
+      let interpreted_c = run::interpreted_c(&bin, &program);
+      let interpreted_cuda = run::interpreted_cuda(&bin, &program);
+      let interpreted_rust = run::interpreted_rust(&bin, &program);
+      let compiled_c = Ok("unsupported".to_string());
+      let compiled_cuda = Ok("unsupported".to_string());
+
+      self.stats.entry(rev.to_string()).or_default().programs.insert(
+        program_name,
+        Program {
+          interpreted_c,
+          interpreted_cuda,
+          interpreted_rust,
+          compiled_c,
+          compiled_cuda,
+        },
+      );
+    }
+
+    Ok(())
+  }
+
+  fn programs(&self) -> Result<Vec<PathBuf>> {
+    fs::read_dir(PROGRAMS_DIR)
+      .context("read dir")?
+      .map(|entry| Ok(entry?.path()))
+      .collect()
   }
 
   fn remote_repo_dir(&self) -> PathBuf {
@@ -98,6 +133,8 @@ impl Bench {
   }
 
   fn cargo_build<P: AsRef<Path>>(&self, dir: P) -> Result<()> {
+    eprintln!("building {dir:?}", dir = dir.as_ref());
+
     Command::new("cargo")
       .current_dir(dir)
       .args(["build", "--release"])
