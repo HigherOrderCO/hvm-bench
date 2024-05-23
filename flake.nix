@@ -12,7 +12,7 @@
           packages = with fenix.packages.${system}; [
             minimal.rustc
             minimal.cargo
-            pkgs.clippy
+            complete.clippy
           ];
         };
       });

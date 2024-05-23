@@ -20,13 +20,13 @@ fn format_header<'a, I: IntoIterator<Item = &'a str>>(revisions: I) -> String {
 
 fn format_rows(stats: &BTreeMap<String, Stats>) -> Result<String> {
   macro_rules! writeln_runtime {
-    ($rows:ident, $revisions:ident, $($col:expr),*) => {{
-      let row = vec![$($col,)*]
+    ($rows:ident, $revisions:ident, $program:expr, $runtime:expr) => {{
+      let row = vec![$program, $runtime]
         .into_iter()
         .chain(
           $revisions
             .values()
-            .map(|r| r.interpreted_c.as_deref().unwrap_or("error")),
+            .map(|r| r.interpreted($runtime).as_deref().unwrap_or("error")),
         )
         .enumerate()
         .map(|(i, col)| {
@@ -68,7 +68,7 @@ fn format_rows(stats: &BTreeMap<String, Stats>) -> Result<String> {
   Ok(rows)
 }
 
-pub fn format(stats: BTreeMap<String, Stats>) -> Result<(String, String)> {
+pub fn format(stats: &BTreeMap<String, Stats>) -> Result<(String, String)> {
   let mut table = String::new();
 
   writeln!(table, "interpreted")?;
@@ -77,7 +77,7 @@ pub fn format(stats: BTreeMap<String, Stats>) -> Result<(String, String)> {
 
   writeln!(table, "{}", format_header(stats.keys().map(String::as_str)))?;
 
-  writeln!(table, "{}", format_rows(&stats)?)?;
+  writeln!(table, "{}", format_rows(stats)?)?;
 
   Ok((table, "unimplemented".to_string()))
 }

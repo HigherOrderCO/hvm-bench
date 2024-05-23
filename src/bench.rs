@@ -59,12 +59,12 @@ impl Bench {
     .context("rename local")?;
 
     for rev in &self.remote_revs {
-      let bin_rev_dir = self.bin_dir().join(&rev);
+      let bin_rev_dir = self.bin_dir().join(rev);
       fs::create_dir(&bin_rev_dir).context("create dir")?;
 
       let binary = bin_rev_dir.join("hvm");
 
-      self.checkout_remote(&rev).with_context(|| format!("checkout {rev}"))?;
+      self.checkout_remote(rev).with_context(|| format!("checkout {rev}"))?;
       self
         .cargo_build(self.remote_repo_dir())
         .with_context(|| format!("cargo build remote {rev}"))?;

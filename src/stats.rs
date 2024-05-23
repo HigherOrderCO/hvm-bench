@@ -21,3 +21,15 @@ pub struct Program {
   pub compiled_c: Result<Timing>,
   pub compiled_cuda: Result<Timing>,
 }
+
+impl Program {
+  pub fn interpreted(&self, runtime: &str) -> &Result<Timing> {
+    match runtime {
+      "c" => &self.interpreted_c,
+      "cuda" => &self.interpreted_cuda,
+      "rust" => &self.interpreted_rust,
+
+      _ => panic!("unexpected runtime: {runtime}"),
+    }
+  }
+}
