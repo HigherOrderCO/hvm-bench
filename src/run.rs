@@ -99,7 +99,7 @@ where
 }
 
 /// Generates a file to be compiled.
-fn generate_program<P, Q>(hvm_bin: P, mode: &str, program: Q, timeout: Duration) -> Result<String>
+fn generate_program<P, Q>(hvm_bin: P, mode: &str, program: Q) -> Result<String>
 where
   P: AsRef<Path>,
   Q: AsRef<Path>,
@@ -107,7 +107,7 @@ where
   let hvm_bin = hvm_bin.as_ref();
   let program = program.as_ref();
 
-  run_program(hvm_bin, mode, program, timeout)
+  run_program(hvm_bin, mode, program, Duration::from_secs(600))
     .with_context(|| format!("{hvm_bin:?} {mode} {program:?}"))?
     .context("timeout")
 }
@@ -155,7 +155,7 @@ where
   Q: AsRef<Path>,
 {
   let mut c_file = Builder::new().suffix(".c").tempfile().context("tempfile")?;
-  let c_code = generate_program(hvm_bin, "gen-c", program, timeout).context("generate program")?;
+  let c_code = generate_program(hvm_bin, "gen-c", program).context("generate program")?;
   c_file.write_all(c_code.as_bytes()).context("write")?;
 
   compile_and_run("gcc", c_file.path(), &["-lm", "-O2"], timeout).context("compile and run")
