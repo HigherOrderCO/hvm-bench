@@ -167,7 +167,7 @@ where
   Q: AsRef<Path>,
 {
   let mut cu_file = Builder::new().suffix(".cu").tempfile().context("tempfile")?;
-  let cu_code = generate_program(hvm_bin, "gen-cu", program, timeout).context("generate program")?;
+  let cu_code = generate_program(hvm_bin, "gen-cu", program).context("generate program")?;
   cu_file.write_all(cu_code.as_bytes()).context("write")?;
 
   compile_and_run("nvcc", cu_file.path(), &["-w", "-O3"], timeout).context("compile and run")
