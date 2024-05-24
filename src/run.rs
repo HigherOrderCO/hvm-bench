@@ -53,15 +53,15 @@ impl Command {
   /// Runs the command, capturing only stdout, returning an error on non-zero
   /// exit.
   fn status_stdout(&mut self) -> Result<String> {
-    let mut child = self.stdout(Stdio::piped()).spawn().context("spawn")?;
-    let mut stdout = child.stdout.take().context("stdout")?;
+    // NOTE(enricozb): for some reason, writing this using a child that's spawned
+    // and waited on does not work for the compilers `gcc` and `nvcc`, they just
+    // hang on `wait()`.
+    let output = self.output().context("output")?;
+    output.status.check_success()?;
 
-    child.check_success()?;
+    std::io::stderr().write_all(&output.stderr).context("write")?;
 
-    let mut output = String::new();
-    stdout.read_to_string(&mut output).context("read")?;
-
-    Ok(output)
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
   }
 
   /// Runs the command, capturing only stdout, returning an error on non-zero
@@ -147,10 +147,12 @@ where
   P: AsRef<Path>,
   Q: AsRef<Path>,
 {
-  Command::new(hvm_bin.as_ref())
+  let output = Command::new(hvm_bin.as_ref())
     .arg(mode)
     .arg(program.as_ref())
-    .status_stdout()
+    .status_stdout();
+
+  output
 }
 
 fn compile_and_run(compiler: &str, file: &Path, args: &[&str], timeout: Duration) -> Result<Timing> {
