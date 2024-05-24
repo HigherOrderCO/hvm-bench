@@ -30,6 +30,8 @@ pub impl Child {
   /// `Ok(None)`.
   fn check_success_timeout(&mut self, timeout: Duration) -> Result<Option<()>> {
     let Some(status) = self.wait_timeout(timeout).context("wait")? else {
+      self.kill().expect("failed to kill child after timeout");
+
       return Ok(None);
     };
 
