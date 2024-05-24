@@ -106,7 +106,7 @@ impl Bench {
           interpreted_c: run::interpreted_c(&bin, &program, self.timeout),
           interpreted_cuda: run::interpreted_cuda(&bin, &program, self.timeout),
           interpreted_rust: run::interpreted_rust(&bin, &program, self.timeout),
-          compiled_c: run::compiled_c(&bin, &program, self.timeout),
+          compiled_c: Ok(run::compiled_c(&bin, &program, self.timeout).unwrap()),
           compiled_cuda: run::compiled_cuda(&bin, &program, self.timeout),
         },
       );

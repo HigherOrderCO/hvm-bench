@@ -1,49 +1,91 @@
 use std::{
   io::{Read, Write},
   path::Path,
-  process::{Command, Stdio},
+  process::{Child, Command, ExitStatus, Stdio},
   time::Duration,
 };
 
 use anyhow::{Context, Result};
-use tempfile::{Builder, TempDir};
-use wait_timeout::ChildExt;
+use tempfile::{Builder, NamedTempFile, TempDir};
+use wait_timeout::ChildExt as WaitExt;
 
 use crate::stats::Timing;
 
 const TIME_PREFIX: &str = "- TIME: ";
 
-/// Runs `hvm_bin` on a program with a given `mode` and returns its stdout. The
-/// `mode` is provided as a positional argument to `hvm_bin`, so it is expected
-/// to be one of the `hvm` commands (`run`, `run-c`, `run-cu`, etc).
-///
-/// # Errors
-///
-/// This will return an error if:
-/// - the exit status is non-zero.
-fn run_program(hvm_bin: &Path, mode: &str, program: &Path, timeout: Duration) -> Result<Option<String>> {
-  let mut child = Command::new(hvm_bin)
-    .arg(mode)
-    .arg(program)
-    .stderr(Stdio::piped())
-    .stdout(Stdio::piped())
-    .spawn()
-    .context("spawn")?;
+#[extend::ext]
+impl ExitStatus {
+  fn check_success(&self) -> Result<()> {
+    if !self.success() {
+      anyhow::bail!("exited with non-zero status {self}");
+    }
 
-  let mut stdout = child.stdout.take().context("stdout")?;
+    Ok(())
+  }
+}
 
-  let status = child.wait_timeout(timeout).context("wait")?;
-  let Some(status) = status else {
-    return Ok(None);
-  };
-  if !status.success() {
-    anyhow::bail!("non-zero exit status {}", status);
+#[extend::ext]
+impl Child {
+  /// Returns an error if the exit status was non-zero.
+  fn check_success(&mut self) -> Result<()> {
+    self.wait().context("wait")?.check_success()
   }
 
-  let mut output = String::new();
-  stdout.read_to_string(&mut output).context("read")?;
+  /// Returns an error if the exit status was non-zero. On timeout, returns
+  /// `Ok(None)`.
+  fn check_success_timeout(&mut self, timeout: Duration) -> Result<Option<()>> {
+    let Some(status) = self.wait_timeout(timeout).context("wait")? else {
+      return Ok(None);
+    };
 
-  Ok(Some(output))
+    status.check_success()?;
+
+    Ok(Some(()))
+  }
+}
+
+#[extend::ext]
+impl Command {
+  fn check_success(&mut self) -> Result<()> {
+    self.status().context("status")?.check_success()
+  }
+
+  /// Runs the command, capturing only stdout, returning an error on non-zero
+  /// exit.
+  fn status_stdout(&mut self) -> Result<String> {
+    let mut child = self.stdout(Stdio::piped()).spawn().context("spawn")?;
+    let mut stdout = child.stdout.take().context("stdout")?;
+
+    child.check_success()?;
+
+    let mut output = String::new();
+    stdout.read_to_string(&mut output).context("read")?;
+
+    Ok(output)
+  }
+
+  /// Runs the command, capturing only stdout, returning an error on non-zero
+  /// exit, or `Ok(None)` on timeout.
+  fn status_stdout_timeout(&mut self, timeout: Duration) -> Result<Option<String>> {
+    let mut child = self.stdout(Stdio::piped()).spawn().context("spawn")?;
+    let mut stdout = child.stdout.take().context("stdout")?;
+
+    if child.check_success_timeout(timeout)?.is_none() {
+      return Ok(None);
+    }
+
+    let mut output = String::new();
+    stdout.read_to_string(&mut output).context("read")?;
+
+    Ok(Some(output))
+  }
+}
+
+#[extend::ext]
+impl NamedTempFile {
+  fn with_suffix(suffix: &str) -> Result<NamedTempFile> {
+    Builder::new().suffix(suffix).tempfile().context("tempfile")
+  }
 }
 
 /// Returns the timing line of an `hvm` run.
@@ -64,10 +106,11 @@ where
   P: AsRef<Path>,
   Q: AsRef<Path>,
 {
-  let hvm_bin = hvm_bin.as_ref();
-  let program = program.as_ref();
-
-  let Some(stdout) = run_program(hvm_bin, mode, program, timeout).context("run")? else {
+  let Some(stdout) = Command::new(hvm_bin.as_ref())
+    .arg(mode)
+    .arg(program.as_ref())
+    .status_stdout_timeout(timeout)?
+  else {
     return Ok("timeout".to_string());
   };
 
@@ -104,49 +147,29 @@ where
   P: AsRef<Path>,
   Q: AsRef<Path>,
 {
-  let hvm_bin = hvm_bin.as_ref();
-  let program = program.as_ref();
-
-  run_program(hvm_bin, mode, program, Duration::from_secs(600))
-    .with_context(|| format!("{hvm_bin:?} {mode} {program:?}"))?
-    .context("timeout")
+  Command::new(hvm_bin.as_ref())
+    .arg(mode)
+    .arg(program.as_ref())
+    .status_stdout()
 }
 
 fn compile_and_run(compiler: &str, file: &Path, args: &[&str], timeout: Duration) -> Result<Timing> {
   let bin_dir = TempDir::with_prefix("hvm-bench-compile-").context("tempdir")?;
   let binary = bin_dir.path().join("bin");
 
-  let status = Command::new(compiler)
+  Command::new(compiler)
     .arg(file)
     .args(args)
     .arg("-o")
     .arg(&binary)
-    .status()
+    .check_success()
     .context("compile")?;
-  if !status.success() {
-    anyhow::bail!("compiler exited with non-zero status {}", status);
-  }
 
-  let mut child = Command::new(binary)
-    .stderr(Stdio::piped())
-    .stdout(Stdio::piped())
-    .spawn()
-    .context("spawn")?;
-
-  let mut stdout = child.stdout.take().context("stdout")?;
-
-  let status = child.wait_timeout(timeout).context("wait")?;
-  let Some(status) = status else {
+  let Some(stdout) = Command::new(binary).status_stdout_timeout(timeout)? else {
     return Ok("timeout".to_string());
   };
-  if !status.success() {
-    anyhow::bail!("non-zero exit status {}", status);
-  }
 
-  let mut output = String::new();
-  stdout.read_to_string(&mut output).context("read")?;
-
-  parse_stdout(&output).context("parse")
+  parse_stdout(&stdout).context("parse")
 }
 
 pub fn compiled_c<P, Q>(hvm_bin: P, program: Q, timeout: Duration) -> Result<Timing>
@@ -154,7 +177,7 @@ where
   P: AsRef<Path>,
   Q: AsRef<Path>,
 {
-  let mut c_file = Builder::new().suffix(".c").tempfile().context("tempfile")?;
+  let mut c_file = NamedTempFile::with_suffix(".c")?;
   let c_code = generate_program(hvm_bin, "gen-c", program).context("generate program")?;
   c_file.write_all(c_code.as_bytes()).context("write")?;
 
@@ -166,7 +189,7 @@ where
   P: AsRef<Path>,
   Q: AsRef<Path>,
 {
-  let mut cu_file = Builder::new().suffix(".cu").tempfile().context("tempfile")?;
+  let mut cu_file = NamedTempFile::with_suffix(".cu")?;
   let cu_code = generate_program(hvm_bin, "gen-cu", program).context("generate program")?;
   cu_file.write_all(cu_code.as_bytes()).context("write")?;
 
