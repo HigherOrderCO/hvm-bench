@@ -10,6 +10,7 @@ use anyhow::{Context, Result};
 use tempfile::TempDir;
 
 use crate::{
+  ext::CommandExt,
   run,
   stats::{Program, Stats},
 };
@@ -136,10 +137,8 @@ impl Bench {
     Command::new("cargo")
       .current_dir(dir)
       .args(["build", "--release"])
-      .spawn()
-      .context("spawn")?
-      .wait()
-      .context("wait")?;
+      .status_stdout()
+      .context("status stdout")?;
 
     Ok(())
   }
@@ -149,10 +148,8 @@ impl Bench {
       .git()
       .args(["clone", GIT_URL])
       .arg(".")
-      .spawn()
-      .context("spawn")?
-      .wait()
-      .context("wait")?;
+      .status_stdout()
+      .context("status stdout")?;
 
     Ok(())
   }
@@ -161,10 +158,8 @@ impl Bench {
     self
       .git()
       .args(["checkout", rev])
-      .spawn()
-      .context("spawn")?
-      .wait()
-      .context("wait")?;
+      .status_stdout()
+      .context("status stdout")?;
 
     Ok(())
   }

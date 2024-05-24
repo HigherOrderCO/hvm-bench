@@ -1,4 +1,5 @@
 mod bench;
+mod ext;
 mod format;
 mod run;
 mod stats;
