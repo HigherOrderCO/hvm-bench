@@ -18,33 +18,34 @@ fn format_header<'a, I: IntoIterator<Item = &'a str>>(revisions: I) -> String {
   format!("{header}\n{}", "=".repeat(header.len()))
 }
 
-fn format_compiled_rows(stats: &BTreeMap<String, Stats>) -> Result<String> {
-  macro_rules! writeln_runtime {
-    ($rows:ident, $revisions:ident, $program:expr, $runtime:expr) => {{
-      let row = vec![$program, $runtime]
-        .into_iter()
-        .chain(
-          $revisions
-            .values()
-            .map(|r| r.compiled($runtime).as_deref().unwrap_or("error")),
-        )
-        .enumerate()
-        .map(|(i, col)| {
-          if i < 2 {
-            format!("{col:<COLUMN_WIDTH$}")
-          } else {
-            format!("{col:>COLUMN_WIDTH$}")
-          }
-        })
-        .collect::<Vec<_>>()
-        .join(COLUMN_PADDING);
+macro_rules! writeln_row {
+  ($mode:ident, $rows:ident, $revisions:ident, $program:expr, $runtime:expr) => {{
+    let row = vec![$program, $runtime]
+      .into_iter()
+      .chain(
+        $revisions
+          .values()
+          .rev()
+          .map(|r| r.$mode($runtime).as_deref().unwrap_or("error")),
+      )
+      .enumerate()
+      .map(|(i, col)| {
+        if i < 2 {
+          format!("{col:<COLUMN_WIDTH$}")
+        } else {
+          format!("{col:>COLUMN_WIDTH$}")
+        }
+      })
+      .collect::<Vec<_>>()
+      .join(COLUMN_PADDING);
 
-      writeln!($rows, "{row}")?;
+    writeln!($rows, "{row}")?;
 
-      row
-    }};
-  }
+    row
+  }};
+}
 
+fn by_program_revision(stats: &BTreeMap<String, Stats>) -> BTreeMap<String, BTreeMap<String, &Program>> {
   let mut by_program_revision: BTreeMap<String, BTreeMap<String, &Program>> = BTreeMap::new();
   for (revision, programs) in stats {
     for (program, stats) in &programs.programs {
@@ -55,11 +56,17 @@ fn format_compiled_rows(stats: &BTreeMap<String, Stats>) -> Result<String> {
     }
   }
 
+  by_program_revision
+}
+
+fn format_compiled_rows(stats: &BTreeMap<String, Stats>) -> Result<String> {
+  let by_program_revision = by_program_revision(stats);
+
   let mut rows = String::new();
 
   for (program, revisions) in &by_program_revision {
-    writeln_runtime!(rows, revisions, program, "c");
-    let row = writeln_runtime!(rows, revisions, "", "cuda");
+    writeln_row!(compiled, rows, revisions, program, "c");
+    let row = writeln_row!(compiled, rows, revisions, "", "cuda");
 
     writeln!(rows, "{}", "-".repeat(row.len()))?;
   }
@@ -68,48 +75,14 @@ fn format_compiled_rows(stats: &BTreeMap<String, Stats>) -> Result<String> {
 }
 
 fn format_interpreted_rows(stats: &BTreeMap<String, Stats>) -> Result<String> {
-  macro_rules! writeln_runtime {
-    ($rows:ident, $revisions:ident, $program:expr, $runtime:expr) => {{
-      let row = vec![$program, $runtime]
-        .into_iter()
-        .chain(
-          $revisions
-            .values()
-            .map(|r| r.interpreted($runtime).as_deref().unwrap_or("error")),
-        )
-        .enumerate()
-        .map(|(i, col)| {
-          if i < 2 {
-            format!("{col:<COLUMN_WIDTH$}")
-          } else {
-            format!("{col:>COLUMN_WIDTH$}")
-          }
-        })
-        .collect::<Vec<_>>()
-        .join(COLUMN_PADDING);
-
-      writeln!($rows, "{row}")?;
-
-      row
-    }};
-  }
-
-  let mut by_program_revision: BTreeMap<String, BTreeMap<String, &Program>> = BTreeMap::new();
-  for (revision, programs) in stats {
-    for (program, stats) in &programs.programs {
-      by_program_revision
-        .entry(program.to_string())
-        .or_default()
-        .insert(revision.to_string(), stats);
-    }
-  }
+  let by_program_revision = by_program_revision(stats);
 
   let mut rows = String::new();
 
   for (program, revisions) in &by_program_revision {
-    writeln_runtime!(rows, revisions, program, "c");
-    writeln_runtime!(rows, revisions, "", "cuda");
-    let row = writeln_runtime!(rows, revisions, "", "rust");
+    writeln_row!(interpreted, rows, revisions, program, "c");
+    writeln_row!(interpreted, rows, revisions, "", "cuda");
+    let row = writeln_row!(interpreted, rows, revisions, "", "rust");
 
     writeln!(rows, "{}", "-".repeat(row.len()))?;
   }
@@ -124,14 +97,14 @@ pub fn format(stats: &BTreeMap<String, Stats>) -> Result<String> {
   writeln!(table, "========")?;
   writeln!(table)?;
 
-  writeln!(table, "{}", format_header(stats.keys().map(String::as_str)))?;
+  writeln!(table, "{}", format_header(stats.keys().rev().map(String::as_str)))?;
   writeln!(table, "{}", format_compiled_rows(stats)?)?;
 
   writeln!(table, "interpreted")?;
   writeln!(table, "===========")?;
   writeln!(table)?;
 
-  writeln!(table, "{}", format_header(stats.keys().map(String::as_str)))?;
+  writeln!(table, "{}", format_header(stats.keys().rev().map(String::as_str)))?;
   writeln!(table, "{}", format_interpreted_rows(stats)?)?;
 
   Ok(table)
